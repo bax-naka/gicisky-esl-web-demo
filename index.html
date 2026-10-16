@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101827">
+<meta name="description" content="Gicisky ESL 2.9-inch 4-color direct BLE demo controller for Android Chrome">
+<title>Gicisky ESL Demo | Bluetooth Direct</title>
+<link rel="stylesheet" href="./style.css">
+<script type="module" src="./app.js"></script>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="eyebrow">GICISKY · E-PAPER CONTROLLER</div>
+    <h1>ESL Demo <span class="version">v0.1</span></h1>
+    <p>Androidから直接Bluetoothで電子ペーパーを書き換えます。</p>
+  </header>
+  <section class="panel">
+    <div class="panel-head"><h2>1. 画面を選ぶ</h2><span class="detail">296 × 128 / 4色</span></div>
+    <div class="template-grid" role="group" aria-label="デモ画面">
+      <button type="button" class="template active" data-template="welcome"><span class="template-icon">◈</span><span class="template-label">ウェルカム</span></button>
+      <button type="button" class="template" data-template="normal"><span class="template-icon">✓</span><span class="template-label">正常稼働</span></button>
+      <button type="button" class="template" data-template="running"><span class="template-icon">◷</span><span class="template-label">検査中</span></button>
+      <button type="button" class="template" data-template="attention"><span class="template-icon">!</span><span class="template-label">注意</span></button>
+      <button type="button" class="template" data-template="alarm"><span class="template-icon">×</span><span class="template-label">異常停止</span></button>
+      <button type="button" class="template" data-template="success"><span class="template-icon">▣</span><span class="template-label">更新完了</span></button>
+    </div>
+    <label class="upload-label" for="upload">任意の画像を選択 <span>PNG / JPEGなど</span></label>
+    <input id="upload" type="file" accept="image/png,image/jpeg,image/webp,image/bmp">
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2>2. プレビュー</h2><span id="selectedLabel" class="detail">ウェルカム</span></div>
+    <div class="preview-shell"><canvas id="preview" width="296" height="128" aria-label="ESL画像プレビュー"></canvas></div>
+    <div class="subactions"><button id="savePng" type="button">PNG保存</button><button id="saveBin" type="button">転送データ保存 (.bin)</button></div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2>3. BLEで送信</h2><span id="connectionIndicator" class="indicator" data-connected="false">BLE 未接続</span></div>
+    <div class="actions"><button id="connect" type="button" class="primary">ESLに接続</button><button id="disconnect" type="button" disabled>切断</button></div>
+    <button id="send" type="button" class="send" disabled>選択画面をESLに書き込む</button>
+    <div class="progress-row"><progress id="progress" max="100" value="0"></progress><span id="progressText">0%</span></div>
+    <div id="status" class="status" role="status" aria-live="polite">ESLが未接続です。</div>
+    <p class="hint">BLE選択画面では、デモ専用のGiciskyタグ（例：NEMR...）を選んでください。ほかの機器は選択しないでください。</p>
+  </section>
+  <section class="panel diagnostic">
+    <div class="panel-head"><h2>診断ログ</h2><button id="copyLog" type="button" class="small">ログをコピー</button></div>
+    <pre id="log" aria-label="BLE診断ログ"></pre>
+  </section>
+  <footer>Web Bluetooth / スマートフォンのみで動作 · 2.9″ 0x002E 対応の試験版<br>通信内容は外部サーバーに送信しません。</footer>
+</div>
+</body>
+</html>
