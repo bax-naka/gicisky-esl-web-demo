@@ -1,10 +1,14 @@
-import { encode296x128RGBA, rgbToPaletteCode, transferImage, WIDTH, HEIGHT, IMAGE_BYTES } from './protocol.js';
+import { encodeForProfile, rgbToPaletteCode, rgbToBwrColor, transferImage, getProfile, WIDTH, HEIGHT } from './protocol.js';
 import { DirectBle } from './ble.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('preview');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const imageChooser = $('upload');
+const modelChooser = $('model');
+const bleAvailable = window.isSecureContext && !!navigator.bluetooth;
+let profileId = modelChooser.value;
+let loadedFile = null;
 const templates = Array.from(document.querySelectorAll('[data-template]'));
 let active = 'welcome';
 let busy = false;
@@ -26,7 +30,8 @@ function setStatus(message, kind = 'info') {
 function setConnection(value) {
   connected = value;
   $('connect').textContent = value ? '接続済み' : 'ESLに接続';
-  $('connect').disabled = busy || value;
+  $('connect').disabled = busy || value || !bleAvailable;
+  modelChooser.disabled = busy || value;
   $('disconnect').disabled = busy || !value;
   $('send').disabled = busy || !value;
   $('connectionIndicator').textContent = value ? 'BLE 接続中' : 'BLE 未接続';
@@ -34,7 +39,8 @@ function setConnection(value) {
 }
 function setBusy(value) {
   busy = value;
-  $('connect').disabled = value || connected;
+  $('connect').disabled = value || connected || !bleAvailable;
+  modelChooser.disabled = value || connected;
   $('disconnect').disabled = value || !connected;
   $('send').disabled = value || !connected;
   $('upload').disabled = value;
@@ -62,10 +68,15 @@ function base(title, sub) {
   text(sub, 288, 13, 'bold 11px sans-serif', '#ffffff', 'right');
 }
 function quantizePreview() {
-  const pixels = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-  const colors = [[0, 0, 0], [255, 255, 255], [255, 255, 0], [255, 0, 0]];
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const is42 = profileId === 'g42';
+  const colors = is42
+    ? [[0, 0, 0], [255, 255, 255], [255, 0, 0]]
+    : [[0, 0, 0], [255, 255, 255], [255, 255, 0], [255, 0, 0]];
   for (let i = 0; i < pixels.data.length; i += 4) {
-    const code = rgbToPaletteCode(pixels.data[i], pixels.data[i+1], pixels.data[i+2]);
+    const code = is42
+      ? rgbToBwrColor(pixels.data[i], pixels.data[i + 1], pixels.data[i + 2])
+      : rgbToPaletteCode(pixels.data[i], pixels.data[i + 1], pixels.data[i + 2]);
     const rgb = colors[code];
     pixels.data[i] = rgb[0];
     pixels.data[i + 1] = rgb[1];
@@ -76,6 +87,7 @@ function quantizePreview() {
 }
 
 function drawTemplate(name) {
+  if (profileId === 'g42') return drawTemplate42(name);
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
   const p = {
     welcome() {
@@ -121,6 +133,59 @@ function drawTemplate(name) {
   log(`プレビュー生成: ${name}`);
 }
 
+function drawTemplate42(name) {
+  const w = 400, h = 300;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, 48);
+  const headers = {
+    welcome: ['GICISKY ESL DEMO', 'BLE DIRECT'],
+    normal: ['設備状態', '設備 A-01'],
+    running: ['製造工程', 'LINE 01'],
+    attention: ['設備状態', '設備 A-01'],
+    alarm: ['設備状態', '設備 A-01'],
+    success: ['BLE通信結果', 'DEMO']
+  };
+  if (!headers[name]) throw new Error('Unknown template');
+  text(headers[name][0], 16, 24, 'bold 23px sans-serif', '#fff');
+  text(headers[name][1], 384, 24, 'bold 16px sans-serif', '#fff', 'right');
+  switch (name) {
+    case 'welcome':
+      text('電子ペーパー', 200, 141, 'bold 49px sans-serif', '#000', 'center');
+      roundedRect(17, 230, 366, 49, 5, '#e50000');
+      text('400 × 300  /  3 COLOR', 200, 254, 'bold 23px sans-serif', '#fff', 'center');
+      break;
+    case 'normal':
+      roundedRect(18, 82, 364, 172, 7, '#000');
+      roundedRect(24, 88, 352, 160, 4, '#fff');
+      text('正常稼働', 200, 165, 'bold 68px sans-serif', '#000', 'center');
+      break;
+    case 'running':
+      roundedRect(18, 79, 364, 174, 7, '#e50000');
+      text('検査中', 200, 161, 'bold 75px sans-serif', '#fff', 'center');
+      text('PROCESS 03 / 07', 200, 276, 'bold 18px sans-serif', '#000', 'center');
+      break;
+    case 'attention':
+      roundedRect(18, 79, 364, 174, 7, '#e50000');
+      text('！注意', 200, 164, 'bold 76px sans-serif', '#fff', 'center');
+      break;
+    case 'alarm':
+      roundedRect(18, 79, 364, 174, 7, '#e50000');
+      text('異常停止', 200, 165, 'bold 67px sans-serif', '#fff', 'center');
+      ctx.fillStyle = '#000';
+      ctx.fillRect(18, 275, 364, 5);
+      break;
+    case 'success':
+      text('更新完了', 200, 150, 'bold 71px sans-serif', '#000', 'center');
+      roundedRect(28, 232, 344, 46, 5, '#e50000');
+      text('TRANSFER COMPLETE', 200, 254, 'bold 22px sans-serif', '#fff', 'center');
+      break;
+  }
+  quantizePreview();
+  log(`プレビュー生成: ${name} (400×300)`);
+}
+
 async function renderCustomFile(file) {
   const url = URL.createObjectURL(file);
   try {
@@ -130,11 +195,12 @@ async function renderCustomFile(file) {
       element.onerror = () => reject(new Error('画像ファイルを開けません'));
       element.src = url;
     });
+    const width = canvas.width, height = canvas.height;
     ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    const scale = Math.min(WIDTH / img.naturalWidth, HEIGHT / img.naturalHeight);
+    ctx.fillRect(0, 0, width, height);
+    const scale = Math.min(width / img.naturalWidth, height / img.naturalHeight);
     const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
-    ctx.drawImage(img, (WIDTH - w) / 2, (HEIGHT - h) / 2, w, h);
+    ctx.drawImage(img, (width - w) / 2, (height - h) / 2, w, h);
     quantizePreview();
     log(`画像読込: ${file.name} (${img.naturalWidth}×${img.naturalHeight})`);
   } finally { URL.revokeObjectURL(url); }
@@ -143,6 +209,7 @@ async function renderCustomFile(file) {
 for (const b of templates) {
   b.addEventListener('click', () => {
     active = b.dataset.template;
+    loadedFile = null;
     templates.forEach(x => x.classList.toggle('active', x === b));
     drawTemplate(active);
     $('selectedLabel').textContent = b.querySelector('.template-label').textContent;
@@ -156,6 +223,7 @@ imageChooser.addEventListener('change', async () => {
   if (!file) return;
   try {
     await renderCustomFile(file);
+    loadedFile = file;
     active = 'custom';
     templates.forEach(x => x.classList.remove('active'));
     $('selectedLabel').textContent = '画像ファイル';
@@ -163,6 +231,31 @@ imageChooser.addEventListener('change', async () => {
     $('progressText').textContent = '0%';
     setStatus('画像を読込みました。BLE接続後に送信できます。');
   } catch (err) { setStatus(err.message, 'error'); }
+});
+
+function resetProgress() {
+  $('progress').value = 0;
+  $('progressText').textContent = '0%';
+}
+
+modelChooser.addEventListener('change', async () => {
+  if (busy || ble.connected) {
+    modelChooser.value = profileId;
+    setStatus('モデル変更前にBLEを切断してください。', 'error');
+    return;
+  }
+  profileId = modelChooser.value;
+  const profile = getProfile(profileId);
+  canvas.width = profile.width;
+  canvas.height = profile.height;
+  $('profileDetail').textContent = `${profile.width} × ${profile.height} / ${profile.colors}色`;
+  resetProgress();
+  try {
+    if (active === 'custom' && loadedFile) await renderCustomFile(loadedFile);
+    else drawTemplate(active);
+    log(`モデル選択: ${profile.label} / ${profile.width}×${profile.height} / ${profile.imageBytes} bytes`);
+    setStatus(`${profile.label}を選択しました。必ず同じ型式のESLに接続してください。`);
+  } catch (err) { setStatus(`プレビュー失敗: ${err.message}`, 'error'); }
 });
 
 $('connect').addEventListener('click', async () => {
@@ -191,13 +284,14 @@ $('send').addEventListener('click', async () => {
   setStatus('ESLに画像を転送しています…');
   const began = performance.now();
   try {
-    const raw = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-    const bytes = encode296x128RGBA(raw.data, raw.width, raw.height);
-    log(`転送開始: ${active} / ${bytes.length} bytes / 240 bytes per block`);
+    const profile = getProfile(profileId);
+    const raw = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const bytes = encodeForProfile(raw.data, profileId);
+    log(`転送開始: ${active} / ${profile.label} ${profile.width}×${profile.height} / ${bytes.length} bytes / 240 bytes per block`);
     const result = await transferImage(ble, bytes, (ratio, writes) => {
       $('progress').value = Math.round(ratio * 100);
       $('progressText').textContent = `${Math.round(ratio * 100)}% (${writes}ブロック)`;
-    });
+    }, profileId);
     const sec = ((performance.now() - began) / 1000).toFixed(1);
     log(`送信完了: ${result.writes}ブロック ${sec}秒 / ACK ${result.terminal}`);
     setStatus(`転送完了：${result.writes}ブロック / ${sec}秒。ESLの表示を確認してください。`, 'ok');
@@ -208,11 +302,11 @@ $('send').addEventListener('click', async () => {
 });
 $('savePng').addEventListener('click', () => canvas.toBlob((blob) => {
   if (!blob) return;
-  download(blob, `gicisky-${active}-296x128.png`);
+  download(blob, `gicisky-${active}-${canvas.width}x${canvas.height}.png`);
 }));
 $('saveBin').addEventListener('click', () => {
-  const bytes = encode296x128RGBA(ctx.getImageData(0, 0, WIDTH, HEIGHT).data);
-  download(new Blob([bytes], { type: 'application/octet-stream' }), `gicisky-${active}-${IMAGE_BYTES}.bin`);
+  const bytes = encodeForProfile(ctx.getImageData(0, 0, canvas.width, canvas.height).data, profileId);
+  download(new Blob([bytes], { type: 'application/octet-stream' }), `gicisky-${active}-${profileId}-${bytes.length}.bin`);
 });
 $('copyLog').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(logLines.join('\n')); setStatus('診断ログをコピーしました。', 'ok'); }
@@ -227,7 +321,7 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-log(`v0.1.0 / ${WIDTH}×${HEIGHT} 4-color / ${IMAGE_BYTES} bytes`);
+log(`v0.2.0 / ${getProfile(profileId).width}×${getProfile(profileId).height} / ${getProfile(profileId).imageBytes} bytes`);
 if (!window.isSecureContext || !navigator.bluetooth) {
   setStatus('Web Bluetoothが利用できません。Android版ChromeでHTTPSのGitHub Pagesから開いてください。', 'error');
   $('connect').disabled = true;
