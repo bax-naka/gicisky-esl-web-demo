@@ -1,10 +1,19 @@
-// Gicisky 2.9-inch 0x002E 296x128 BWRY codec and transfer protocol.
+// Gicisky 2.9-inch BWRY / 4.2-inch BWR codecs and ACK transfer protocol.
 // No external dependencies. Verified structurally against the owner's working Python implementation.
 export const WIDTH = 296;
 export const HEIGHT = 128;
 export const CHUNK_SIZE = 240;
 export const IMAGE_BYTES = WIDTH * HEIGHT / 4;
 export const END_RESPONSE = '050800000000';
+export const PROFILES = Object.freeze({
+  g29: Object.freeze({ id: 'g29', label: '2.9インチ', width: 296, height: 128, colors: 4, imageBytes: 9472, deviceType: '0x002E' }),
+  g42: Object.freeze({ id: 'g42', label: '4.2インチ', width: 400, height: 300, colors: 3, imageBytes: 30000, deviceType: '0x004B' })
+});
+export function getProfile(id = 'g29') {
+  const profile = PROFILES[id];
+  if (!profile) throw new Error('Unsupported ESL profile: ' + id);
+  return profile;
+}
 
 export function toHex(data) {
   return Array.from(data, x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
@@ -74,9 +83,43 @@ export function encode296x128RGBA(rgba, width = WIDTH, height = HEIGHT) {
   return out;
 }
 
-export async function transferImage(link, imageData, onProgress = () => {}) {
-  if (!(imageData instanceof Uint8Array) || imageData.length !== IMAGE_BYTES) {
-    throw new Error(`2.9-inch 4-color image must be ${IMAGE_BYTES} bytes`);
+// 4.2-inch 0x004B BWR: 1-bit monochrome plane, then 1-bit red plane.
+ // Per pixel: BW 1=white, 0=black/red; RED 1=red, 0=otherwise.
+ // Row-major MSB-first, no rotation (verified against the Raspberry Pi test codec).
+export function rgbToBwrColor(r, g, b) {
+  if (r > 128 && g > 128 && b > 128) return 1;  // white
+  if (r > 128 && g <= 128 && b <= 128) return 2; // red
+  return 0;                                      // black
+}
+
+export function encode400x300RGBA(rgba, width = 400, height = 300) {
+  const profile = PROFILES.g42;
+  if (width !== profile.width || height !== profile.height || rgba.length !== width * height * 4) {
+    throw new Error('Expected 400x300 RGBA canvas');
+  }
+  const planeBytes = width * height / 8;
+  const out = new Uint8Array(profile.imageBytes);
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const i = pixel * 4;
+    const code = rgbToBwrColor(rgba[i], rgba[i + 1], rgba[i + 2]);
+    const index = pixel >> 3, bit = 7 - (pixel & 7);
+    if (code === 1) out[index] |= 1 << bit;
+    if (code === 2) out[planeBytes + index] |= 1 << bit;
+  }
+  return out;
+}
+
+export function encodeForProfile(rgba, profileId) {
+  const profile = getProfile(profileId);
+  return profile.id === 'g42'
+    ? encode400x300RGBA(rgba, profile.width, profile.height)
+    : encode296x128RGBA(rgba, profile.width, profile.height);
+}
+
+export async function transferImage(link, imageData, onProgress = () => {}, profileId = 'g29') {
+  const profile = getProfile(profileId);
+  if (!(imageData instanceof Uint8Array) || imageData.length !== profile.imageBytes) {
+    throw new Error(`${profile.label} image must be ${profile.imageBytes} bytes`);
   }
   const ackStart = await link.writeControl(Uint8Array.of(0x01));
   if (toHex(ackStart.subarray(0, 3)) !== '01F400') {
@@ -92,8 +135,12 @@ export async function transferImage(link, imageData, onProgress = () => {}) {
   let repeatedPart = -1;
   let repeatedCount = 0;
   let writes = 0;
-  const maxWrites = Math.ceil(imageData.length / CHUNK_SIZE) + 20;
+  const totalParts = Math.ceil(imageData.length / CHUNK_SIZE);
+  const maxWrites = totalParts + 20;
+  let lastChunkSent = false;
   for (; writes < maxWrites; writes++) {
+    if (part >= totalParts) throw new Error(`Out of range block ${part} before transfer completed`);
+    if (part === totalParts - 1) lastChunkSent = true;
     const ack = await link.writeData(dataPacket(imageData, part));
     onProgress(Math.min(1, ((part + 1) * CHUNK_SIZE) / imageData.length), writes + 1);
     if (ack.length >= 6 && ack[0] === 0x05 && ack[1] === 0) {
@@ -101,6 +148,15 @@ export async function transferImage(link, imageData, onProgress = () => {}) {
       if (nextPart === repeatedPart) repeatedCount++;
       else { repeatedPart = nextPart; repeatedCount = 1; }
       if (repeatedCount >= 5) throw new Error(`Transfer stalled on part ${nextPart}`);
+      // On 4.2-inch 0x004B tags the final ACK may be a request for
+      // the next (past-the-end) part rather than 050800000000.
+      // Accept this ONLY after the final data chunk has been sent.
+      if (profile.id === 'g42' && nextPart === totalParts) {
+        if (!lastChunkSent) throw new Error('Premature end-of-image ACK');
+        onProgress(1, writes + 1);
+        return { writes: writes + 1, bytes: imageData.length, terminal: `OFFSET_END(part=${nextPart})` };
+      }
+      if (nextPart >= totalParts) throw new Error(`Unexpected next block ${nextPart}`);
       part = nextPart;
       continue;
     }
