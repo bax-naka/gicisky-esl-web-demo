@@ -1,5 +1,5 @@
-import { encodeForProfile, rgbToPaletteCode, rgbToBwrColor, transferImage, getProfile, WIDTH, HEIGHT } from './protocol.js';
-import { DirectBle } from './ble.js';
+import { encodeForProfile, rgbToPaletteCode, rgbToBwrColor, transferImage, getProfile, WIDTH, HEIGHT } from './protocol.js?v=0.2.0';
+import { DirectBle } from './ble.js?v=0.2.0';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('preview');
