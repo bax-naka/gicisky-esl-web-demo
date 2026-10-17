@@ -1,67 +1,72 @@
-# Gicisky ESL Web Demo (Android / Direct BLE)
+# Gicisky ESL Web Demo — Android / Direct BLE
 
-GitHub Pages向けの**ビルド不要・外部依存なし**の静的Webアプリです。Android版ChromeでWeb Bluetoothを使い、Gicisky 2.9インチのデモ専用ESLに直接書き込みます。
+Android版Chromeから **Gicisky 2.9インチと4.2インチの電子ペーパーへ直接BLEで書き込む** GitHub Pages用の静的Webアプリです。ビルド・サーバー・Wi-Fi・ESPHome Proxyは不要です。
 
-## 状態
+## 対応モデルと検証状況（v0.2.0）
 
-**v0.1.0: 実機未検証の試験版**です。通信順序・2bpp画素エンコードは動作中の既存Python実装に合わせています。Web BluetoothによるGATT接続と244バイトのWrite Without Responseが対象Android/ESLの組み合わせで成立するかは、実機確認が必要です。
+| 選択 | タグの仕様 | 画像形式 | 転送量 | ブロック数 | Android直接BLE |
+| --- | --- | --- | ---: | ---: | --- |
+| 2.9インチ（0x002E）| 296×128 / 黒・白・赤・黄 | 90°反時計回り回転・2bpp | 9,472 B | 40 | **実機成功**（2026-10-16、約5.3秒・写真とACKログ） |
+| 4.2インチ（0x004B）| 400×300 / 黒・白・赤 | 回転なし・BW/REDの1bpp 2面 | 30,000 B | 125 | **未検証**（既存の4.2インチ用Pythonテストコードから移植） |
 
-## 対象と機能
+**機種は自動判定しません。実機に合うサイズを選択してから接続してください。** 2.9インチに4.2インチ用のデータを送らないでください。使用中はモデル選択を無効化します。
 
-- 対象: **Gicisky 2.9インチ / 296×128 / 4色（黒・白・赤・黄） / device type 0x002E**
-- **画面6種類**の切り替え（日本語フォントは端末のフォントを使用）
-- 任意の画像ファイルを読み込み（白余白付きで縦横比を維持、4色へ単純量子化）
-- プレビューをPNG形式で保存、転送バイナリの保存
-- BLE機器選択 → GATT FEF0 (FEF1制御・FEF2画像) → ACKを待ちながら転送
-- ステータス、進捗、ACKログ表示・コピー
-- ブラウザから外部サービスへの通信なし（GitHub Pagesが静的ファイルを配布する通信は除く）
-- **実運用のMACアドレス/IPアドレス/鍵を含めない**
+## 主な機能
 
-## GitHub Pagesへの公開
+- サイズ選択と6種類のデモ画面（ウェルカム、正常稼働、検査中、注意、異常停止、更新完了）
+- 各モデルのネイティブ解像度でのプレビュー、任意の画像読み込みと3色/4色量子化
+- PNGおよび書き込み用バイナリの保存
+- Chrome Web Bluetoothで直接GATT FEF0 / FEF1 / FEF2へ接続
+- 240バイト単位のACK付き転送、進捗・診断ログ表示
+- 固定のMACアドレス、IPアドレス、API鍵、外部送信なし
 
-1. GitHub上で `gicisky-esl-web-demo` 等の**新しいPublicリポジトリ**を作成する。既存の private `esl-controller` とは分離する。
-2. このフォルダのファイル（`index.html`、`app.js`、`ble.js`、`protocol.js`、`style.css`、`.nojekyll`、`README.md` など）をリポジトリのルートにアップロードする。**zipファイルをそのままアップロードしない**。
-3. `Settings` → `Pages` → `Build and deployment` → `Source: Deploy from a branch` → `Branch: main`、`/(root)` → `Save`。
-4. 公開後、`https://<GitHubユーザー名>.github.io/<リポジトリ名>/` を**Android版Chrome**で開く。HTTPSが必須です。
-5. デモ用タグだけ電源を入れ、画面を選び「ESLに接続」から表示名（例 NEMR...）を選択。接続後「書き込む」。
+4.2インチの任意画像は実装元Pythonコードと同じ簡易色判定を使います。白はRGBの全成分が128超、赤はRが128超・G/Bが128以下、それ以外は黒になります。色味が想定と異なる場合は、黒・白・純赤の画像を用意してください。
 
-※ 公開GitHub Pagesを開くための通信は必要ですが、ページが読み込まれた後のESLへの画像転送は端末とESLのBLE直接通信です。サーバー、Wi-Fi、ESPHome Proxyを使いません。
+## GitHub Pagesでの使い方
 
-## 開発者向けテスト
+1. [Pages設定](https://github.com/bax-naka/gicisky-esl-web-demo/settings/pages) の **Deploy from a branch / main / (root)** を設定する。
+2. Android版Chromeで [公開サイト](https://bax-naka.github.io/gicisky-esl-web-demo/) にHTTPSでアクセスする。
+3. 2.9インチまたは4.2インチを選択して、デモ画面か画像ファイルを選ぶ。
+4. 「ESLに接続」から **デモ専用のGicisky ESL** を選び、接続後に「選択画面をESLに書き込む」を押す。
+5. 最終ACKと画面が正常に更新されたことを確認する。完了後、ESL側から切断されることがあります。
 
+別のモデルに切り替える場合は、BLE接続を切断してからモデルを変更し、正しいESLへ接続し直してください。
+
+## BLEプロトコル概要
+
+両モデルで制御サービスは `FEF0`、制御/ACK通知は `FEF1`、画像データは `FEF2` を使用します。
+
+- START: `01` → ACK `01F400`
+- サイズ通知: `02 + uint32le(byte count) + 000000` → ACK先頭 `02`
+- 画像開始: `03` → ACK `0500 + uint32le(next part)`
+- データ: `uint32le(part) + image[part*240 : (part+1)*240]`
+- 通常の完了ACK: `050800000000`
+- 4.2インチでは、**最後の画像ブロック送信後に限り** `0500 + uint32le(125)` を完了として受理します。後者は既存Pythonテストコードの `OFFSET_END` 判定に基づきます。
+
+2.9インチの画像エンコーダーは従来の4色2bpp方式のままです。4.2インチはピクセルの最上位bit優先で、最初の15,000 Bが白/非白ビット面、次の15,000 Bが赤/非赤ビット面です。
+
+## 自動テスト
+
+Node.js 18以降で:
+
+```sh
+npm test
 ```
-node --test tests/*.test.js
-```
 
-または `python -m http.server 8000` でローカルプレビューできますが、**Androidの別端末から http://LAN-IP:8000 でアクセスすると secure context にならずWeb Bluetoothは使用できません**。必ずGitHub PagesのHTTPSサイトから操作してください。
+2.9インチの既存テストと、4.2インチの色変換・MSB画素順・125ブロック・2種類の終了ACK・早期終了拒否のテストを実施します。
 
-## BLEプロトコル（対象0x002E）
+## 制約・注意
 
-- Service `0000fef0-0000-1000-8000-00805f9b34fb`
-- FEF1: control write / notification
-- FEF2: image data write
-- 送信画像: 296×128のRGBAを、90度反時計回りに変換して2bpp化。コード `00=黒`, `01=白`, `10=黄`, `11=赤`。全9472バイト
-- `01` → ACK `01f400`
-- `02 + uint32le(9472) + 000000` → ACK先頭`02`
-- `03` → ACK `0500` + 次ブロック番号(LE)
-- FEF2: `uint32le(block_number) + image_bytes[block*240:...]` をACKに従って送信
-- ACK `0500` + 次ブロック番号 / 完了 `050800000000`
+- 対象タグは既存コードで確認している2.9インチ（0x002E）と4.2インチ（0x004B）を想定しています。別型式では画素並びや転送形式が異なる可能性があります。
+- **4.2インチのAndroid直接書き込みは未検証です。** 正常終了ACKを受信したら必ず表示を目視で確認してください。
+- Android版ChromeでWeb Bluetoothを使用するために、Bluetooth有効化とHTTPSが必要です。
+- BLEのGATT最大転送長が不足した場合、244バイト（4バイトpart番号 + 240バイト画像）のWrite Without Responseが失敗する可能性があります。
+- 無応答・失敗の際はログをコピーして解析してください。
+- デモ専用のESLだけに使用し、運用中の別ESLを書き換えないでください。
 
-## よくあるエラー
+## 元実装・参考
 
-- **Bluetoothが利用不可**: Android版Chrome・HTTPS・Bluetooth有効化を確認。
-- **FEF0が見つからない**: 型番違い、デバイス選択違い、またはGATTサービス差異の可能性。nRF Connectなどでサービス構成を確認。
-- **BLE write failed (244 bytes)**: 接続時に必要なATT MTUが確保できなかった可能性。20バイト刻みへの単純分割はプロトコルのブロック番号と整合しないため、自動的には行いません。
-- **ACK timeout**: Notifications未受信、通信不安定、ESL側の状態不一致など。
-- **表示色がおかしい**: 色変換・回転は0x002E用固定。ほかのサイズやモデルにはそのまま使えません。
-- **最後に接続が切れる**: 正常書き込み後、ESL側から切断される場合があります。表示の状態と完了ACKも確認してください。
-
-## 注意
-
-本ツールは**デモ専用のESLだけ**に使用してください。ベータ版につき接続失敗時は再接続してください。公開のHTML/JSには個人情報・MACアドレス・秘密鍵を記載しないでください。
-
-## 参考
-
+- 2.9インチのPython送信コード（非公開リポジトリ）: `bax-naka/esl-controller/app/gicisky_esl.py`
+- 4.2インチのPython送信/エンコーダーテスト（非公開リポジトリ）: `bax-naka/esl-controller/tools/gicisky_42_proxy_test.py`
 - https://developer.chrome.com/docs/capabilities/bluetooth
-- https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
-- https://github.com/atc1441/ATC_GICISKY_ESL
+- https://docs.github.com/en/pages
