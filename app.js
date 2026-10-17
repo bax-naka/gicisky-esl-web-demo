@@ -1,5 +1,5 @@
-import { encodeForProfile, rgbToPaletteCode, rgbToBwrColor, transferImage, getProfile, WIDTH, HEIGHT } from './protocol.js?v=0.2.0';
-import { DirectBle } from './ble.js?v=0.2.0';
+import { encodeForProfile, rgbToPaletteCode, rgbToBwrColor, transferImage, getProfile, WIDTH, HEIGHT } from './protocol.js?v=0.2.1';
+import { DirectBle } from './ble.js?v=0.2.1';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('preview');
@@ -294,7 +294,25 @@ $('send').addEventListener('click', async () => {
     }, profileId);
     const sec = ((performance.now() - began) / 1000).toFixed(1);
     log(`送信完了: ${result.writes}ブロック ${sec}秒 / ACK ${result.terminal}`);
-    setStatus(`転送完了：${result.writes}ブロック / ${sec}秒。ESLの表示を確認してください。`, 'ok');
+    setStatus(`画像転送完了：${result.writes}ブロック / ${sec}秒。BLEを自動切断しています…`, 'ok');
+
+    // 4.2-inch tags start refreshing after GATT disconnect; 2.9-inch
+    // tags often disconnect themselves after the terminal ACK.
+    // Allow the final ACK a brief settling period before disconnecting.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    if (ble.connected) {
+      try {
+        await ble.disconnect();
+        log('画像転送完了後、BLEを自動切断しました');
+      } catch (disconnectError) {
+        log(`画像転送完了後のBLE切断エラー: ${disconnectError.message}`);
+        setStatus(`画像の転送は完了しましたが、BLE切断に失敗しました：${disconnectError.message}。切断ボタンを押してください。`, 'error');
+        return;
+      }
+    } else {
+      log('画像転送完了後、ESL側でBLE切断済み');
+    }
+    setStatus(`画像転送完了：${result.writes}ブロック / ${sec}秒。BLE切断済みです。ESLの表示を確認してください。`, 'ok');
   } catch (err) {
     log(`転送エラー: ${err.message}`);
     setStatus(`転送失敗: ${err.message}`, 'error');
@@ -321,7 +339,7 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-log(`v0.2.0 / ${getProfile(profileId).width}×${getProfile(profileId).height} / ${getProfile(profileId).imageBytes} bytes`);
+log(`v0.2.1 / ${getProfile(profileId).width}×${getProfile(profileId).height} / ${getProfile(profileId).imageBytes} bytes`);
 if (!window.isSecureContext || !navigator.bluetooth) {
   setStatus('Web Bluetoothが利用できません。Android版ChromeでHTTPSのGitHub Pagesから開いてください。', 'error');
   $('connect').disabled = true;
